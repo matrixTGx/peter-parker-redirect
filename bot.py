@@ -10,7 +10,6 @@ from utils import temp, load_datas, delete_messages_loop
 from typing import Union, Optional, AsyncGenerator
 from pyrogram import types
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from plugins.index import motor_col_general, index_files_to_db
 
 pyroutils.MIN_CHAT_ID = -999999999999
 pyroutils.MIN_CHANNEL_ID = -100999999999999
