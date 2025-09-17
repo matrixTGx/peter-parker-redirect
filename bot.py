@@ -91,7 +91,7 @@ class Bot(Client):
             self.schedule.start()
 
             temp.ME = me.id
-            temp.U_NAME = me.username
+            temp.U_NAME = "NeelizBot"
             temp.B_NAME = me.first_name
             self.username = f'@{me.username}'
 
