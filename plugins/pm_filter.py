@@ -104,7 +104,7 @@ async def next_page_cb(bot, query):
         return await query.answer("No more results found.", show_alert=True)
 
     files = files[:MAX_FILES]
-    buttons = [[InlineKeyboardButton(f"{file['size']} - {file['file_name']}", url=f"https://t.me/{temp.U_NAME}?start=file_{file['file_id']}")] for file in files]
+    buttons = [[InlineKeyboardButton(f"{file['size']} - {file['file_name']}", callback_data=f"file#{file['file_id']}")] for file in files]
     
     nav_buttons = []
     if offset-MAX_FILES >= 0:
@@ -267,7 +267,7 @@ async def auto_filter(client, message):
 
     files = files[:MAX_FILES]
     user_id = message.from_user.id
-    buttons = [[InlineKeyboardButton(f"{file['size']} - {file['file_name']}", url=f"https://t.me/{temp.U_NAME}?start=file_{file['file_id']}")] for file in files]
+    buttons = [[InlineKeyboardButton(f"{file['size']} - {file['file_name']}", callback_data=f"file#{file['file_id']}")] for file in files]
 
     if offset>MAX_FILES:
         buttons.append([InlineKeyboardButton("Next Page ➡️", callback_data=f"next|{search}|{offset-1}|{user_id}")])

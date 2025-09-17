@@ -256,3 +256,170 @@ async def start(client, message):
         
     except Exception as e:
         logger.error(f"Error sending cached media: {e}")
+
+
+@Client.on_message(filters.command(["reportbug", "request"]))
+async def report_or_request_command(client, message):
+    """Handles both /reportbug and /request commands."""
+    if len(message.command) < 2:
+        return await message.reply_text("Please provide a description after the command.")
+
+    command_type = "bug" if message.command[0] == "reportbug" else "request"
+    item_description = " ".join(message.command[1:])
+
+    if await send_log_report(client, message.from_user, item_description, command_type):
+        reply_text = "🐛 Your bug report has been sent." if command_type == "bug" else "📝 Your request has been sent."
+        await message.reply_text(reply_text + " Thank you!")
+    else:
+        await message.reply_text("❌ An error occurred while sending your report. Please try again later.")
+
+
+@Client.on_message(filters.command("delete_duplicate") & filters.user(ADMINS))
+async def delete_duplicate_files(client, message):
+    try:
+        status = await message.reply("🔄 Starting duplicate deletion process...")
+        deleted_count = 0
+        batch_size = 0
+        BATCH_LIMIT = 1000
+        collections = [Media2, Media3]
+        unique_files = {}
+        await status.edit("🔍 Scanning for unique files...")
+        async def build_unique_files(collection_model):
+            skip = 0
+            while True:
+                docs = await collection_model.collection.find({}, {"file_id": 1, "file_size": 1}).skip(skip).limit(BATCH_LIMIT).to_list(length=None)
+                if not docs:
+                    break
+                for doc in docs:
+                    file_id = doc.get("file_id") or doc.get("_id")
+                    file_size = doc.get("file_size")
+                    if file_size and file_id and file_size not in unique_files:
+                        unique_files[file_size] = file_id
+                skip += BATCH_LIMIT
+                await asyncio.sleep(0.01)
+        for col in collections:
+            await build_unique_files(col)
+        if not unique_files:
+            await status.edit("⚠️ No files found in collections.")
+            return
+        await status.edit("🗑️ Starting duplicate deletion...")
+        async def delete_duplicates(collection_model):
+            nonlocal deleted_count, batch_size
+            skip = 0
+            while True:
+                docs = await collection_model.collection.find({}, {"file_id": 1, "file_size": 1}).skip(skip).limit(BATCH_LIMIT).to_list(length=None)
+                if not docs:
+                    break
+                for doc in docs:
+                    file_id = doc.get("file_id") or doc.get("_id")
+                    file_size = doc.get("file_size")
+                    if file_size in unique_files and unique_files[file_size] != file_id:
+                        await collection_model.collection.delete_one({"_id": file_id})
+                        deleted_count += 1
+                        if deleted_count % 100 == 0:
+                            batch_size += 1
+                            await status.edit(f"🗑️ Deleted {deleted_count} files in {batch_size} batches...")
+                            await asyncio.sleep(0.05)
+                skip += BATCH_LIMIT
+                await asyncio.sleep(0.01)
+        for col in collections:
+            await delete_duplicates(col)
+        if deleted_count == 0:
+            await status.edit("✅ No duplicates found. Database is clean.")
+        else:
+            await status.edit(f"✅ Deleted {deleted_count} duplicates in {batch_size} batches.")
+    except Exception as e:
+        logger.exception("Error during delete_duplicate_files")
+        await message.reply(f"❌ Error occurred:\n<code>{str(e)}</code>")
+
+@Client.on_message(filters.command('restart') & filters.user(ADMINS))
+async def restart(b, m):
+    try:
+        if os.path.exists(".git"):
+            os.system("git pull")
+    except Exception as e:
+        await m.reply_text(f"Error during git pull: {e}")
+
+    restart_message = await m.reply_text("Restarting...")
+    try:
+        os.remove("TelegramBot.txt")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        await m.reply_text(f"Error removing TelegramBot.txt: {e}")
+
+    os.execl(sys.executable, sys.executable, "bot.py")
+
+@Client.on_message(filters.command('delete') & filters.user(ADMINS))
+async def delete(bot, message):
+    # Use the walrus operator (:=) to check for and assign variables in one line
+    if not (reply := message.reply_to_message) or not (media := reply.document or reply.video or reply.audio):
+        return await message.reply('Reply to a file with /delete.', quote=True)
+
+    msg = await message.reply("Processing...⏳", quote=True)
+    try:
+        file_id, _ = unpack_new_file_id(media.file_id)
+        deleted_from = []
+
+        # Attempt to delete from each database, adding successes to a list
+        try:
+            if await delete_file_sql(file_id):
+                deleted_from.append("SQL")
+        except Exception as e:
+            logger.error(f"SQL delete failed: {e}")
+
+        try:
+            result = await Media2.collection.delete_one({'_id': file_id})
+            if result.deleted_count:
+                deleted_from.append("MongoDB")
+        except Exception as e:
+            logger.error(f"MongoDB delete failed: {e}")
+
+        try:
+            result = await Media3.collection.delete_one({'_id': file_id})
+            if result.deleted_count:
+                deleted_from.append("MongoDB")
+        except Exception as e:
+            logger.error(f"MongoDB delete failed: {e}")
+            
+        # Report the final status based on the list contents
+        if deleted_from:
+            status = f"✅ Successfully deleted from: **{', '.join(deleted_from)}**."
+        else:
+            status = "⚠️ File not found or failed to delete from any database."
+        await msg.edit(status)
+
+    except Exception as e:
+        logger.error(f"Delete command error: {e}")
+        await msg.edit(f"❌ An unexpected error occurred: `{e}`")
+
+@Client.on_message(filters.command("deletefiles") & filters.user(ADMINS))
+async def deletemultiplefiles(bot, message):
+    try:
+        keyword = message.text.split(None, 1)[1]
+    except IndexError:
+        return await message.reply_text(f"<b>Hᴇʏ {message.from_user.mention}, Gɪᴠᴇ ᴍᴇ ᴀ ᴋᴇʏᴡᴏʀᴅ ᴀʟᴏɴɢ ᴡɪᴛʜ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ᴅᴇʟᴇᴛᴇ ғɪʟᴇs.</b>")
+    btn = [[InlineKeyboardButton("Yᴇs, Cᴏɴᴛɪɴᴜᴇ !", callback_data=f"killfilesdq#{keyword}")],
+           [InlineKeyboardButton("Nᴏ, Aʙᴏʀᴛ ᴏᴘᴇʀᴀᴛɪᴏɴ !", callback_data="close_data")]]
+    await message.reply_text(
+        text="<b>Aʀᴇ ʏᴏᴜ sᴜʀᴇ? Dᴏ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴄᴏɴᴛɪɴᴜᴇ?\n\nNᴏᴛᴇ:- Tʜɪs ᴄᴏᴜʟᴅ ʙᴇ ᴀ ᴅᴇsᴛʀᴜᴄᴛɪVE ᴀᴄᴛɪᴏɴ!</b>",
+        reply_markup=InlineKeyboardMarkup(btn),
+        parse_mode=enums.ParseMode.HTML
+    )
+
+@Client.on_message(filters.command('deleteall') & filters.user(ADMINS))
+async def delete_all_index(bot, message):
+    await message.reply_text(
+        'This will delete all indexed files.\nDo you want to continue??',
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(text="YES", callback_data="autofilter_delete")],
+                                            [InlineKeyboardButton(text="CANCEL", callback_data="close_data")]]),
+        quote=True,
+    )
+
+@Client.on_callback_query(filters.regex(r'^autofilter_delete'))
+async def delete_all_index_confirm(bot, message):
+    await Media2.collection.drop()
+    await Media3.collection.drop()
+    await delete_all_files_sql()
+    await message.answer('Piracy Is Crime')
+    await message.message.edit('Successfully Deleted All The Indexed Files.')
