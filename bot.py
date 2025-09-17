@@ -173,39 +173,6 @@ class Bot(Client):
                     logger.error(f"❌ Failed to send restart message to OWNER_ID ({OWNER_ID}): {e}")
             else:
                 logger.warning("OWNER_ID not set. Cannot send restart notification.")        
-            
-            status = await motor_col_general.find_one({"_id": "index"})
-            if status:
-                chat_to_index = status.get("user_id") # Renamed for clarity
-                if chat_to_index:
-                    try:
-                        db_type = status.get("db", "N/A")
-                        last_id = status.get("last_id")
-                        current = status.get("current")
-            
-                        if last_id is None or current is None:
-                            logger.warning("DB status document is missing 'last_id' or 'current'. Skipping index resumption.")
-                            return
-            
-                        msg = await self.send_message(
-                            chat_id=int(OWNER_ID),
-                            text=(
-                                "⚠️ Bot restarted while indexing was running. Resuming process...\n\n"
-                                f"• **Target Chat:** `{chat_to_index}`\n"
-                                f"• **DB Type:** `{db_type}`\n"
-                                f"• **Last Fetched ID:** `{current}`\n"
-                            )
-                        )
-                        
-                        temp.CURRENT = current
-                        # FIX: Pass the 'chat_to_index' as the target chat and the 'OWNER_ID' as the user who initiated it.
-                        await index_files_to_db(self, msg, chat_to_index, int(OWNER_ID), db_type, int(last_id))
-                    
-                    except Exception as e:
-                        logger.error(f"❌ Failed to resume indexing for chat {chat_to_index}: {e}", exc_info=True)
-            
-            logger.info("✅ Bot startup process completed.")
-
         except Exception as e:
             logger.critical(f"❌ An unrecoverable error occurred during startup: {e}", exc_info=True)
             sys.exit(1)
